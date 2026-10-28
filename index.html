@@ -1,0 +1,121 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Nova Swarm</title>
+<style>
+:root{--bg:#e9eef7;--ink:#14203a;--dim:#5d6a88;--btn:#cfd8ec;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}
+html{scroll-padding-top:env(safe-area-inset-top,0px)}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){--bg:#060912;--ink:#e8f0ff;--dim:#8d9bbd;--btn:#1b2540;color-scheme:dark}}
+:root[data-theme="dark"]{--bg:#060912;--ink:#e8f0ff;--dim:#8d9bbd;--btn:#1b2540;color-scheme:dark}
+body{margin:0;background:var(--bg);color:var(--ink);font-family:"Trebuchet MS",system-ui,sans-serif;display:flex;flex-direction:column;align-items:center;min-height:100vh;padding:12px}
+h1{font-size:1.25rem;margin:4px 0 8px;letter-spacing:.04em}
+#wrap{width:min(94vw,calc((100vh - 200px)*.75),420px);min-width:240px}
+#hud{display:flex;justify-content:space-between;font-weight:700;margin-bottom:6px;font-variant-numeric:tabular-nums}
+#hud span{color:var(--dim);font-weight:400;margin-right:4px}
+canvas{width:100%;aspect-ratio:3/4;display:block;border-radius:10px;background:#070a1a;touch-action:none}
+canvas:focus-visible,#pad button:focus-visible{outline:3px solid #7dffd1}
+#hint{color:var(--dim);font-size:.85rem;margin:8px 0;text-align:center;max-width:420px}
+#pad{display:none;gap:8px;margin-top:4px}
+#pad button{width:84px;height:56px;background:var(--btn);color:var(--ink);border:0;border-radius:10px;font-size:1.4rem}
+@media (pointer:coarse){#pad{display:flex}}
+</style></head><body>
+<h1>Nova Swarm</h1>
+<div id="wrap">
+<div id="hud"><div><span>Score</span><b id="sc">0</b></div><div><span>Best</span><b id="bs">0</b></div><div><span>Stage</span><b id="sg">1</b></div><div id="li" aria-label="Lives"></div></div>
+<canvas id="c" tabindex="0" aria-label="Game board"></canvas>
+</div>
+<div id="hint">Left and right arrows or A and D to move, space to fire, P to pause. On touch, drag on the board to steer. Firing is automatic while you touch.</div>
+<div id="pad"><button id="bl" aria-label="Left">◀</button><button id="bf" aria-label="Fire">●</button><button id="br" aria-label="Right">▶</button></div>
+<script>
+const W=360,H=480,cv=document.getElementById('c'),ctx=cv.getContext('2d');cv.width=W*2;cv.height=H*2;ctx.scale(2,2);
+const $=i=>document.getElementById(i);
+let st='title',score=0,best=0,lives=3,stage=1,en=[],pb=[],eb=[],fx=[],tm=0,divT=1,tmr=0,paused=false,keys={},cd=0,touch=false,tx=null,hold=false;
+try{best=+localStorage.getItem('ns-best')||0}catch(e){}
+const ship={x:W/2,y:H-36,inv:0};
+const stars=Array.from({length:70},()=>({x:Math.random()*W,y:Math.random()*H,s:20+Math.random()*60,r:Math.random()*1.4+.4}));
+const TC=['#4fd8e8','#ff8fc7','#ffb454'];
+function hud(){$('sc').textContent=score;$('bs').textContent=best;$('sg').textContent=stage;$('li').textContent=Array(Math.max(lives,0)).fill('▲').join(' ')}
+function mkStage(){en=[];pb=[];eb=[];let i=0;
+ for(let r=0;r<4;r++)for(let c=0;c<8;c++,i++){const ty=r===0?2:r===1?1:0;
+  en.push({type:ty,hp:ty===2?2:1,sx:40+c*40,sy:60+r*32,x:0,y:-30,state:'wait',delay:Math.floor(i/8)*1.8+(i%8)*.14,t:0,dir:i%2?1:-1,x0:0,shot:false})}
+ divT=3}
+function newGame(){score=0;lives=3;stage=1;ship.x=W/2;ship.inv=0;mkStage();st='play';hud()}
+function boom(x,y,c,n=14){for(let i=0;i<n;i++){const a=Math.random()*7,v=40+Math.random()*120;fx.push({x,y,vx:Math.cos(a)*v,vy:Math.sin(a)*v,l:.6,c})}}
+function addScore(n){score+=n;if(score>best){best=score;try{localStorage.setItem('ns-best',best)}catch(e){}}hud()}
+function fire(){if(cd>0||pb.length>=2||st!=='play')return;pb.push({x:ship.x,y:ship.y-12});cd=.18}
+function hitPlayer(){if(ship.inv>0||st!=='play')return;boom(ship.x,ship.y,'#7dffd1',24);lives--;hud();eb=[];st='dead';tmr=1.5}
+function update(dt){
+ tm+=dt;cd-=dt;ship.inv-=dt;
+ stars.forEach(s=>{s.y+=s.s*dt;if(s.y>H){s.y=0;s.x=Math.random()*W}});
+ fx.forEach(p=>{p.x+=p.vx*dt;p.y+=p.vy*dt;p.l-=dt});fx=fx.filter(p=>p.l>0);
+ if(st==='dead'){tmr-=dt;if(tmr<=0){if(lives>0){st='play';ship.inv=2;ship.x=W/2}else st='over'}return}
+ if(st==='clear'){tmr-=dt;if(tmr<=0){stage++;mkStage();st='play';hud()}return}
+ if(st!=='play')return;
+ const sp=210;
+ if(tx!==null)ship.x+=Math.max(-sp*1.6*dt,Math.min(sp*1.6*dt,tx-ship.x));
+ else ship.x+=((keys.right?1:0)-(keys.left?1:0))*sp*dt;
+ ship.x=Math.max(16,Math.min(W-16,ship.x));
+ if(keys.fire||hold)fire();
+ pb.forEach(b=>b.y-=420*dt);pb=pb.filter(b=>b.y>-10);
+ eb.forEach(b=>{b.y+=b.vy*dt;b.x+=b.vx*dt});eb=eb.filter(b=>b.y<H+10);
+ const fo=Math.sin(tm*.9)*18,spd=140+stage*12;
+ let divers=en.filter(e=>e.state==='dive').length;
+ divT-=dt;
+ if(divT<=0){divT=Math.max(.5,1.7-stage*.12);
+  if(divers<2+Math.floor(stage/2)){const f=en.filter(e=>e.state==='form');if(f.length){const e=f[Math.floor(Math.random()*f.length)];e.state='dive';e.t=0;e.x0=e.x;e.dir=e.x>ship.x?-1:1;e.shot=false}}}
+ for(const e of en){
+  if(e.state==='wait'){e.delay-=dt;if(e.delay<=0){e.state='enter';e.t=0}continue}
+  if(e.state==='enter'){e.t+=dt/1.5;const t=Math.min(e.t,1),k=t*t*(3-2*t),x0=e.dir>0?-20:W+20;
+   e.x=x0+(e.sx+fo-x0)*k+Math.sin(t*Math.PI)*e.dir*40;e.y=-20+(e.sy+20)*t+Math.sin(t*Math.PI*3)*14*(1-t);
+   if(e.t>=1)e.state='form'}
+  else if(e.state==='form'){e.x=e.sx+fo;e.y=e.sy}
+  else if(e.state==='dive'){e.t+=dt;e.y+=spd*dt;e.x=e.x0+Math.sin(e.t*4)*55*e.dir+(ship.x-e.x0)*Math.min(e.t*.3,.45);
+   if(!e.shot&&e.y>100&&e.y<300&&Math.random()<dt*1.6){e.shot=true;const a=Math.atan2(ship.y-e.y,ship.x-e.x);eb.push({x:e.x,y:e.y,vx:Math.cos(a)*110,vy:Math.sin(a)*110+50})}
+   if(e.y>H+20){e.state='ret';e.y=-20}}
+  else if(e.state==='ret'){e.x=e.sx+fo;e.y+=170*dt;if(e.y>=e.sy){e.y=e.sy;e.state='form'}}
+  if(e.state==='dive'&&Math.hypot(e.x-ship.x,e.y-ship.y)<16){boom(e.x,e.y,TC[e.type]);e.hp=0;hitPlayer()}
+ }
+ for(const b of pb)for(const e of en){if(e.hp>0&&e.state!=='wait'&&Math.hypot(e.x-b.x,e.y-b.y)<13){b.y=-99;e.hp--;
+  if(e.hp<=0){boom(e.x,e.y,TC[e.type]);addScore((e.type===2?150:e.type===1?80:50)*(e.state==='dive'?2:1))}else boom(e.x,e.y,'#fff',5);break}}
+ en=en.filter(e=>e.hp>0);
+ for(const b of eb)if(Math.hypot(b.x-ship.x,b.y-ship.y)<10){b.y=H+99;hitPlayer()}
+ if(!en.length&&st==='play'){st='clear';tmr=1.8}
+}
+function wing(x,y,c,t,s){ctx.fillStyle=c;const f=Math.sin(t*12)*3;
+ ctx.beginPath();ctx.moveTo(x,y-8*s);ctx.lineTo(x+13*s,y-4*s+f);ctx.lineTo(x+9*s,y+7*s);ctx.lineTo(x,y+3*s);ctx.lineTo(x-9*s,y+7*s);ctx.lineTo(x-13*s,y-4*s+f);ctx.closePath();ctx.fill();
+ ctx.fillStyle='#070a1a';ctx.beginPath();ctx.arc(x-4*s,y-1*s,2,0,7);ctx.arc(x+4*s,y-1*s,2,0,7);ctx.fill()}
+function draw(){
+ ctx.fillStyle='#070a1a';ctx.fillRect(0,0,W,H);
+ stars.forEach(s=>{ctx.fillStyle=s.r>1.3?'#cfe0ff':'#6b7aa8';ctx.fillRect(s.x,s.y,s.r,s.r)});
+ for(const e of en){if(e.state==='wait')continue;wing(e.x,e.y,e.type===2&&e.hp===1?'#ff7b54':TC[e.type],tm+e.sx,e.type===2?1.15:1)}
+ ctx.fillStyle='#ffe9b0';pb.forEach(b=>ctx.fillRect(b.x-1.5,b.y-6,3,12));
+ ctx.fillStyle='#ff5d73';eb.forEach(b=>{ctx.beginPath();ctx.arc(b.x,b.y,3.5,0,7);ctx.fill()});
+ if(st!=='dead'&&st!=='over'&&(ship.inv<=0||Math.floor(tm*14)%2)){const x=ship.x,y=ship.y;
+  ctx.fillStyle='#7dffd1';ctx.beginPath();ctx.moveTo(x,y-14);ctx.lineTo(x+5,y);ctx.lineTo(x+14,y+10);ctx.lineTo(x+5,y+7);ctx.lineTo(x,y+11);ctx.lineTo(x-5,y+7);ctx.lineTo(x-14,y+10);ctx.lineTo(x-5,y);ctx.closePath();ctx.fill();
+  ctx.fillStyle='#ff9e3d';ctx.fillRect(x-2,y+11,4,3+Math.random()*4)}
+ fx.forEach(p=>{ctx.globalAlpha=Math.max(p.l/.6,0);ctx.fillStyle=p.c;ctx.fillRect(p.x,p.y,3,3)});ctx.globalAlpha=1;
+ ctx.textAlign='center';
+ const say=(t,s,y)=>{ctx.font='bold 24px "Trebuchet MS",sans-serif';ctx.fillStyle='#7dffd1';ctx.fillText(t,W/2,y);if(s){ctx.font='14px "Trebuchet MS",sans-serif';ctx.fillStyle='#e8f0ff';ctx.fillText(s,W/2,y+24)}};
+ if(st==='clear')say('Stage '+stage+' clear',null,H/2);
+ if(paused)say('Paused','Press P to resume',H/2);
+ if(st==='title'||st==='over'){ctx.fillStyle='rgba(7,10,26,.8)';ctx.fillRect(0,0,W,H);
+  ctx.font='bold 38px "Trebuchet MS",sans-serif';ctx.fillStyle='#7dffd1';ctx.fillText(st==='over'?'Game over':'Nova Swarm',W/2,170);
+  ctx.font='16px "Trebuchet MS",sans-serif';ctx.fillStyle='#e8f0ff';
+  if(st==='over')ctx.fillText('Score '+score,W/2,205);
+  ctx.fillText('Shoot the swarm before it dives on you.',W/2,250);ctx.fillText('Diving enemies are worth double.',W/2,274);
+  ctx.fillStyle='#ff8fc7';ctx.fillText(st==='over'?'Press space or tap to play again':'Press space or tap to start',W/2,330)}
+}
+const kmap={arrowleft:'left',a:'left',arrowright:'right',d:'right',' ':'fire'};
+addEventListener('keydown',e=>{const k=e.key.toLowerCase(),m=kmap[k];
+ if(m){e.preventDefault();keys[m]=true;if((st==='title'||st==='over')&&(m==='fire'))newGame()}
+ else if(k==='p'&&(st==='play'||st==='clear'))paused=!paused;else if(k==='enter'&&(st==='title'||st==='over'))newGame()});
+addEventListener('keyup',e=>{const m=kmap[e.key.toLowerCase()];if(m)keys[m]=false});
+function px(e){const r=cv.getBoundingClientRect();return(e.clientX-r.left)/r.width*W}
+cv.addEventListener('pointerdown',e=>{cv.setPointerCapture(e.pointerId);if(st==='title'||st==='over')newGame();tx=px(e);hold=true});
+cv.addEventListener('pointermove',e=>{if(hold)tx=px(e)});
+const up=()=>{hold=false;tx=null};cv.addEventListener('pointerup',up);cv.addEventListener('pointercancel',up);
+const bind=(id,k)=>{const b=$(id);b.addEventListener('pointerdown',e=>{e.preventDefault();keys[k]=true;if((st==='title'||st==='over'))newGame()});['pointerup','pointerleave','pointercancel'].forEach(t=>b.addEventListener(t,()=>keys[k]=false))};
+bind('bl','left');bind('br','right');bind('bf','fire');
+mkStage();hud();let last=performance.now();
+(function loop(n){const dt=Math.min(.05,(n-last)/1000);last=n;if(!paused)update(dt);else{}draw();requestAnimationFrame(loop)})(last);
+</script></body></html>
